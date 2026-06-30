@@ -78,9 +78,13 @@ EOF
 systemctl reload ssh || systemctl reload sshd || true
 
 # --- 4. Firewall ---------------------------------------------------------------
+# Port 22 is left open to the world HERE on purpose: you're connected over the
+# public IP right now, and slamming it shut mid-provision would lock you out.
+# Once Tailscale is up and you've confirmed tailnet SSH works, run
+# scripts/lock-down-tailscale.sh to restrict 22 to the tailnet (the levels.io way).
 ufw default deny incoming
 ufw default allow outgoing
-ufw allow 22/tcp     # SSH
+ufw allow 22/tcp     # SSH (locked to tailnet later by lock-down-tailscale.sh)
 ufw allow 80/tcp     # HTTP (Caddy ACME + redirect)
 ufw allow 443/tcp    # HTTPS
 ufw --force enable
@@ -91,6 +95,16 @@ systemctl enable --now unattended-upgrades || true
 
 # --- 6. fail2ban (brute-force protection on SSH) -------------------------------
 systemctl enable --now fail2ban
+
+# --- 6b. Tailscale -------------------------------------------------------------
+# Installs the Tailscale daemon. This does NOT bring the box onto your tailnet —
+# that step (`sudo tailscale up`) is interactive (it prints an auth link) and is
+# left for you to run AFTER provisioning, so a bad config can't lock you out.
+# Once the box is on your tailnet, run scripts/lock-down-tailscale.sh to restrict
+# SSH (port 22) to the tailnet only — the way levels.io secures a box.
+if ! command -v tailscale >/dev/null 2>&1; then
+  curl -fsSL https://tailscale.com/install.sh | sh
+fi
 
 # --- 7. Node LTS ---------------------------------------------------------------
 if ! command -v node >/dev/null 2>&1; then
@@ -196,6 +210,18 @@ cat <<EOF
  3. Point DNS: an A record for ${DOMAIN} -> this server's IP.
     (If using Cloudflare, you can proxy it once the origin is up.)
 
- 4. From your dev machine, edit + run scripts/deploy.sh for the first deploy.
+ 4. Bring this box onto your Tailscale network (recommended — the levels.io way):
+      sudo tailscale up           # follow the printed auth link to log in
+      tailscale ip -4             # note the 100.x.y.z tailnet address
+    Then, AFTER you've confirmed you can SSH over the tailnet
+    (ssh ${DEPLOY_USER}@<100.x.y.z>), lock SSH to the tailnet only:
+      bash scripts/lock-down-tailscale.sh
+    See references/security-tailscale.md.
+
+ 5. Choose your workflow:
+    - Path A (host only): from your dev machine, edit + run scripts/deploy.sh.
+    - Path B (develop ON the VPS, the levels.io way): run
+        bash scripts/setup-dev-on-vps.sh
+      then connect with Termius + tmux. See references/develop-on-vps.md.
 ================================================================================
 EOF
