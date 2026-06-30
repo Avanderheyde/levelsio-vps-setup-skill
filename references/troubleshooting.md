@@ -124,3 +124,70 @@ journalctl -u <app> -n 100 --no-pager
 Common causes: a missing secret (see env section), the DB binding issue above,
 port 3000 already in use, or a crash on boot. With `Restart=always` systemd will
 keep retrying, so the logs are your source of truth.
+
+## Locked out after Tailscale lockdown
+
+**Symptom:** after `lock-down-tailscale.sh`, you can no longer SSH in — the
+connection times out.
+
+**Cause:** SSH is now restricted to the `tailscale0` interface, but your client
+isn't reaching the box over the tailnet (Tailscale down on your side, you're
+using the public IP instead of the `100.x.y.z` address, or the box dropped off
+the tailnet).
+
+**Fix:**
+
+- First, just connect over the tailnet: `tailscale status` on your laptop, then
+  `ssh deploy@<100.x.y.z>` (the box's `tailscale ip -4`), not the public IP.
+- If the box itself fell off the tailnet, use your provider's **web console /
+  VNC** (Hetzner Cloud Console, DigitalOcean Droplet Console) to get a shell, then
+  re-open SSH and fix Tailscale:
+  ```bash
+  sudo ufw allow 22/tcp && sudo ufw reload
+  sudo tailscale up
+  ```
+- Keep that out-of-band console login handy *before* you lock down — it's your
+  only way back in if the tailnet is unreachable.
+
+## Claude Code won't log in on the box (Path B)
+
+**Symptom:** `claude` / `/login` on the server can't open a browser, or the login
+never completes.
+
+**Cause:** the box is headless — there's no browser for the OAuth redirect.
+
+**Fix:** use the **browser-link flow**, not a local browser. Claude Code prints a
+URL and a code; open the URL on *any* device (laptop or phone), authenticate,
+then **paste the code back** into the terminal. Alternatively set an API key
+(`ANTHROPIC_API_KEY`, or paste when prompted). Do this *inside* a tmux session so
+the login persists with the session. If you're on a phone via Termius: long-press
+to copy the URL, open it in your browser, approve, copy the code, paste it back.
+
+## Claude Code (or a long task) dies when I disconnect (Path B)
+
+**Symptom:** you close your laptop / lose signal and Claude Code stops mid-task;
+reconnecting shows it gone.
+
+**Cause:** you started `claude` in a plain SSH shell, not inside tmux. When the
+SSH connection drops, the shell and everything in it are killed.
+
+**Fix:** always run Claude **inside a tmux session**. With the `tm` helper
+installed (`setup-dev-on-vps.sh`), `cd /srv/<app> && tm` first, *then* `claude`.
+Detach with `Ctrl-b d` instead of closing the connection cold. Reattach later
+with `tm` (or it auto-attaches on login). See
+`remote-claude-code-tmux.md`.
+
+## tmux session piling up / wrong session on connect (Path B)
+
+**Symptom:** `tmux ls` shows many near-duplicate sessions, or connecting drops
+you into the wrong one.
+
+**Cause:** sessions created ad-hoc with `tmux new` instead of the folder-named
+`tm` helper, or the Termius startup snippet doesn't `cd` into the site folder
+first.
+
+**Fix:** rely on `tm` (one session per folder) and set each Termius host's
+startup command to `cd /srv/<app> && tm`. Kill strays with
+`tmux kill-session -t <name>`. Note: tmux sessions do **not** survive a reboot —
+the *app* survives because it runs under systemd; your dev session you just
+recreate with `tm`.
